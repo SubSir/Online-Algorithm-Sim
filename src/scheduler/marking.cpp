@@ -94,9 +94,14 @@ class MarkingScheduler : public Scheduler {
             srand(time(0));
             // Initialize the cache misses
             auto result = Result(requests);
+            int cnt = 0;
             
             for (auto &request : requests) {
                 auto obj_id = request.obj_id;
+                if (cnt % 100000 == 0) {
+                    std:: cout << "Running " << cnt << "-th request" << std::endl; 
+                }
+                cnt++;
 
                 // first we check if the object is in the cache
                 if (this -> cache_set.find(obj_id) == this -> cache_set.end()) {

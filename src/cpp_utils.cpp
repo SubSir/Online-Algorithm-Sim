@@ -12,6 +12,8 @@
 
 #include "cpp_utils.hpp"
 
+const int max_requests =  10000000;
+
 /*
     Function to reorder the requests since there are requests with the same timestamp
 */
@@ -45,15 +47,19 @@ std :: vector<Request> _parse_trace(std::string trace_file) {
     char buffer[24];
 
     // Read the requests until the end of the file
-    while (trace.read(buffer, sizeof(buffer))) {
+    while (trace.read(buffer, sizeof(buffer)) and requests.size() < max_requests) {
         req.timestamp = *reinterpret_cast<uint32_t*>(buffer);
         req.obj_id = *reinterpret_cast<uint64_t*>(buffer + 4);
         req.obj_size = *reinterpret_cast<uint32_t*>(buffer + 12);
         req.next_access_vtime = *reinterpret_cast<int64_t*>(buffer + 16);
         requests.push_back(req);
+        if (requests.size() % 1000000 == 0) {
+            std:: cout << "Finish parsing " << requests.size() << "requests" << std:: endl;
+        }
     }
 
-    if (trace.eof()) {
+    if (trace.eof() or requests.size() == max_requests) {
+        std:: cout << "Finish parsing " << trace_file << std:: endl;
         requests = _reorder_requests(requests);
         return std :: move(requests);
     }

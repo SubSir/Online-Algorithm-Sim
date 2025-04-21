@@ -4,9 +4,9 @@
 
 # Install the required packages
 
-pip install pybind11
-pip install zstandard
-pip install tqdm
+# pip install pybind11
+# pip install zstandard
+# pip install tqdm
 
 # Run this script from the root directory of the project
 

@@ -43,10 +43,15 @@ class LFUScheduler : public Scheduler {
 
         Result run(std :: vector<Request>& requests) {
             // Initialize the cache misses
+            int cnt = 0;
             auto result = Result(requests);
             
             uint32_t counter = 0;
             for (auto &request : requests) {
+                if (cnt % 100000 == 0) {
+                    std:: cout << "Running " << cnt << "-th request" << std::endl; 
+                }
+                cnt++;
                 auto obj_id = request.obj_id;
                 auto num_of_access = 1;
 

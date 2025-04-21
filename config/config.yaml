@@ -2,5 +2,5 @@ algorithm: OPT
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/cloudphysics/
-num_to_test: 50
+num_to_test: 1 
 cache_size: 512

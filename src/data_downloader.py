@@ -29,25 +29,26 @@ def download_data_from_url(dataset_url, dataset_path):
 
 def decompress_zst(dataset_path):
     """
-    Decompress all .zst files in a directory
-        @param dataset_path: path to the directory containing the .zst files
-        @return: a list of the decompressed files
+    将目录中所有.zst文件解压到dataset_path下
+    @param dataset_path: 包含.zst文件的目录路径
+    @return: 解压后的文件路径列表
     """
     with os.scandir(dataset_path) as entries:
         data_list = []
-        for entry in tqdm(entries, desc = "Decompressing .zst files"):
+        for entry in tqdm(entries, desc="Decompressing .zst files"):
             if entry.is_file() and entry.name.endswith(".zst"):
-                with open(entry, 'rb') as compressed_file:
-                    # Do not decompress if the file is already decompressed
-                    if entry.name.rstrip(".zst") not in os.listdir(dataset_path):
-                        with open(entry.name.rstrip('.zst'), 'wb') as destination:
+                # 生成目标文件名（带完整路径）
+                target_filename = os.path.join(dataset_path, entry.name.rstrip(".zst"))
+                # 检查目标文件是否已存在
+                if not os.path.exists(target_filename):
+                    with open(
+                        entry.path, "rb"
+                    ) as compressed_file:  # 源文件路径用entry.path
+                        with open(target_filename, "wb") as destination:
                             dctx = zstd.ZstdDecompressor()
                             with dctx.stream_reader(compressed_file) as reader:
                                 shutil.copyfileobj(reader, destination)
-                                data_list.append(os.path.join(dataset_path, entry.name.rstrip('.zst')))
-                    else:
-                        data_list.append(os.path.join(dataset_path, entry.name.rstrip('.zst')))
-    
+                data_list.append(target_filename)  # 统一记录到列表
     return data_list
 
 def download_data(args):

@@ -44,13 +44,18 @@ class LRUScheduler : public Scheduler {
         Result run(std :: vector<Request>& requests) {
             // Initialize the cache misses
             auto result = Result(requests);
+            int cnt = 0;
 
             // auto unique_set = std :: set<uint64_t>();
             
             // uint32_t counter = 0;
             for (auto &request : requests) {
                 // counter++;
-
+                if (cnt % 100000 == 0) {
+                    std:: cout << "Running " << cnt << "-th request" << std::endl; 
+                }
+                cnt++;
+                
                 auto obj_id = request.obj_id;
                 auto last_access = request.timestamp;
 

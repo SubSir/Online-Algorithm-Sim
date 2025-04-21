@@ -28,9 +28,14 @@ class LIFOScheduler : public Scheduler {
         Result run(std :: vector<Request>& requests) {
             // Initialize the cache misses
             auto result = Result(requests);
+            int cnt = 0;
             
             for (auto &request : requests) {
                 auto obj = request.obj_id;
+                if (cnt % 100000 == 0) {
+                    std:: cout << "Running " << cnt << "-th request" << std::endl; 
+                }
+                cnt++;
 
                 // first we check if the object is in the cache
                 if (this -> cache_set.find(obj) == this -> cache_set.end()) {
