@@ -12,7 +12,7 @@
 
 #include "cpp_utils.hpp"
 
-const int max_requests =  10000000;
+const int max_requests =  10000;
 
 std :: vector<Request> _parse_trace(std::string trace_file) {
     std :: ifstream trace(trace_file);
