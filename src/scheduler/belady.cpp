@@ -17,195 +17,129 @@
 
 struct OPTObject {
     uint64_t obj_id;
-    int64_t next_access;
-    int64_t insert_time;
+    uint64_t next_access;
+    uint64_t insert_time;
 
-    OPTObject(const uint64_t obj_id, const int64_t next_access, const int64_t insert_time) {
-        this -> obj_id = obj_id;
-        this -> next_access = next_access;
-        this -> insert_time = insert_time;
-    }
+    OPTObject(const uint64_t obj_id, const uint64_t next_access, const uint64_t insert_time)
+        : obj_id(obj_id), next_access(next_access), insert_time(insert_time) {}
 
     bool operator < (const OPTObject& other) const {
-        return this -> next_access > other.next_access;
+        // next_access 较大优先被淘汰
+        if (next_access != other.next_access)
+            return next_access > other.next_access;
+        return obj_id < other.obj_id; // 保证唯一性
     }
 };
 
 struct OPTObject2 {
     uint64_t obj_id;
     bool prediction;
-    int64_t insert_time;
+    uint64_t insert_time;
 
-    OPTObject2(const uint64_t obj_id, const bool prediction, int64_t insert_time) {
-        this -> obj_id = obj_id;
-        this -> prediction = prediction;
-        this -> insert_time = insert_time;
-    }
+    OPTObject2(const uint64_t obj_id, const bool prediction, uint64_t insert_time)
+        : obj_id(obj_id), prediction(prediction), insert_time(insert_time) {}
 
     bool operator < (const OPTObject2& other) const {
-        if (this -> prediction != other . prediction) {
-            return this -> prediction;
-        }
-        return this -> insert_time < other . insert_time;
+        if (prediction != other.prediction)
+            return prediction > other.prediction;
+        return insert_time < other.insert_time;
     }
 };
 
 class Belady {
-    public:
-    std:: uint64_t cache_size;
-    std :: set<OPTObject> cache;
-    std::set<OPTObject, std::function<bool(const OPTObject&, const OPTObject&)>> cache_set;
+public:
+    uint64_t pos = 0;
+    uint64_t cache_size;
+    std::set<OPTObject> cache; // 按 next_access 降序排序
+    std::unordered_map<uint64_t, std::set<OPTObject>::iterator> cache_map; // obj_id->迭代器
     std::vector<bool> result;
 
-    Belady(const uint64_t cache_size) :cache_size(cache_size), result(),
-    cache_set([](const OPTObject& a, const OPTObject& b) {
-        return a.obj_id < b.obj_id;
-    }) {
-        this->cache_size = cache_size;
-    }
+    Belady(const uint64_t cache_size)
+        : cache_size(cache_size), result() {}
 
-    void initial(std::vector<Request> &v) {
-        int64_t v_time = -1;
-        this -> result.resize(v.size());
-        for (auto &request : v) {
-            v_time++;
-            auto obj_id = request.obj_id;
-            auto next_access = request.next_access_vtime;
-            auto is_in_cache = [&cache_set = this -> cache_set](const uint64_t& obj_id) {
-                auto it = cache_set.lower_bound(OPTObject(obj_id, 0, 0));
-                if (it == cache_set.end() || it -> obj_id != obj_id) {
-                    return cache_set.end();
-                }
-                return it;
-            };
-
-            std :: set<OPTObject> :: iterator it;
-            if ((it = is_in_cache(obj_id)) == this -> cache_set.end()) {
-                if (this -> cache.size() == this -> cache_size) {
-                    auto evicted_obj = *this -> cache.begin();
-                    this -> cache.erase(this -> cache.begin());
-                    this -> cache_set.erase(evicted_obj);
-                    if (evicted_obj.insert_time >= this -> result.size()) {
-                        this -> result.resize(evicted_obj.insert_time + 1);
-                    }
-                    this -> result[evicted_obj.insert_time] = true;
-                }
-            }
-            else {
-                auto obj = *it;
-                this -> cache.erase(obj);
-                this -> cache_set.erase(it);
-            }
-
-            auto obj = OPTObject(obj_id, next_access, v_time);
-            this -> cache.insert(obj);
-            this -> cache_set.insert(obj);
+    void initial(std::vector<Request>& v) {
+        result.resize(v.size());
+        for (auto& request : v) {
+            process(request);
         }
     }
 
-    void droplet(Request &request, int64_t v_time) {
-        auto obj_id = request.obj_id;
-        auto next_access = request.next_access_vtime;
-        auto is_in_cache = [&cache_set = this -> cache_set](const uint64_t& obj_id) {
-            auto it = cache_set.lower_bound(OPTObject(obj_id, 0, 0));
-            if (it == cache_set.end() || it -> obj_id != obj_id) {
-                return cache_set.end();
-            }
-            return it;
-        };
-
-        std :: set<OPTObject> :: iterator it;
-        if ((it = is_in_cache(obj_id)) == this -> cache_set.end()) {
-            if (this -> cache.size() == this -> cache_size) {
-                auto evicted_obj = *this -> cache.begin();
-                this -> cache.erase(this -> cache.begin());
-                this -> cache_set.erase(evicted_obj);
-                if (evicted_obj.insert_time >= this -> result.size()) {
-                    this -> result.resize(evicted_obj.insert_time + 1);
-                }
-                this -> result[evicted_obj.insert_time] = true;
-            }
-        }
-        else {
-            auto obj = *it;
-            this -> cache.erase(obj);
-            this -> cache_set.erase(it);
-        }
-
-        auto obj = OPTObject(obj_id, next_access, v_time);
-        this -> cache.insert(obj);
-        this -> cache_set.insert(obj);
+    void droplet(Request& request) {
+        process(request);
     }
 
     void resize(const uint64_t X_len) {
-        this -> result.resize(X_len);
+        result.resize(X_len);
+    }
+
+private:
+    void process(Request& request) {
+        uint64_t obj_id = request.obj_id;
+        uint64_t next_access = request.next_access_vtime;
+
+        auto it = cache_map.find(obj_id);
+        if (it == cache_map.end()) {
+            // 没有命中cache，考虑淘汰
+            if (cache.size() == cache_size) {
+                auto evicted = *cache.begin();
+                cache_map.erase(evicted.obj_id);
+                cache.erase(cache.begin());
+                // 标记被淘汰位置
+                if (evicted.insert_time >= result.size())
+                    result.resize(evicted.insert_time + 1);
+                result[evicted.insert_time] = true;
+            }
+        } else {
+            // 命中cache，需要先删除旧条目
+            cache.erase(it->second);
+            cache_map.erase(it);
+        }
+        // 更新到cache和cache_map
+        auto ins = cache.insert(OPTObject(obj_id, next_access, pos)).first;
+        cache_map[obj_id] = ins;
+        pos++;
     }
 };
-
 class LSTMScheduler {
     public:
+        uint64_t pos = 0;
         uint64_t cache_size;
-        std :: set<OPTObject2> cache;
-        std::set<OPTObject2, std::function<bool(const OPTObject2&, const OPTObject2&)>> cache_set;
-
-
-        LSTMScheduler(uint64_t cache_size) : cache_size(cache_size), 
-        cache_set([](const OPTObject2& a, const OPTObject2& b) {
-            return a.obj_id < b.obj_id;
-        }) {
-            this -> cache = std :: set<OPTObject2>();
-        }
-
-        Result run(std :: vector<Request>& requests, std:: vector<bool>& predictions) {
-            // Initialize the cache misses
+        std::set<OPTObject2> cache; // 按 prediction、insert_time 排序
+        std::unordered_map<uint64_t, std::set<OPTObject2>::iterator> cache_map;
+    
+        LSTMScheduler(uint64_t cache_size) : cache_size(cache_size) {}
+    
+        Result run(std::vector<Request>& requests, std::vector<bool>& predictions) {
             auto result = Result(requests);
-            
-            // uint32_t counter = 0;
-            int64_t cnt = -1;
-            for (auto &request : requests) {
-                cnt ++;
-                auto obj_id = request.obj_id;
-                // first we check if the object is in the cache
-
-                auto is_in_cache = [&cache_set = this -> cache_set](const uint64_t& obj_id) {
-                    auto it = cache_set.lower_bound(OPTObject2(obj_id, 0, 0));
-                    if (it == cache_set.end() || it -> obj_id != obj_id) {
-                        return cache_set.end();
-                    }
-                    return it;
-                };
-                std :: set<OPTObject2> :: iterator it;
-                if ((it = is_in_cache(obj_id)) == this -> cache_set.end()) {
-                    // Not in the cache
+    
+            for (const auto& request : requests) {
+                uint64_t obj_id = request.obj_id;
+                bool pred = predictions[pos];
+    
+                auto it = cache_map.find(obj_id);
+    
+                if (it == cache_map.end()) {
+                    // Not in cache
                     result.cache_misses++;
-
-                    // If the cache is full, remove the object that has the longest time to be nextly accessed
-                    if (this -> cache.size() == this -> cache_size) {
-                        auto evicted_obj = *this -> cache.begin();
-                        // std :: cerr << "Evicting object with next access time " << evicted_obj.next_access << std :: endl;
-                        this -> cache.erase(this -> cache.begin());
-                        this -> cache_set.erase(evicted_obj);
+                    // 缓存满了，淘汰优先策略元素
+                    if (cache.size() == cache_size) {
+                        auto evict_it = cache.begin();
+                        cache_map.erase(evict_it->obj_id);
+                        cache.erase(evict_it);
                     }
                 } else {
-                    // In the cache
-                    // We need to update the next access time of the object
-
-                    // Remove the old object from the cache
-                    auto obj = *it;
-                    this -> cache.erase(obj);
-                    this -> cache_set.erase(it);
+                    // In cache，需更新 prediction, insert_time
+                    cache.erase(it->second); // 先移除旧元素
                 }
-                auto obj = OPTObject2(obj_id, predictions[cnt], cnt);
-                // if (next_access != -1) {
-                //     assert (obj_id == requests[next_access-1].obj_id);
-                // }
-                this -> cache.insert(obj);
-                this -> cache_set.insert(obj);
+                // 插入新元素，并同步 map
+                auto ins = cache.insert(OPTObject2(obj_id, pred, pos)).first;
+                cache_map[obj_id] = ins;
+                pos++;
             }
-
+    
             return result;
         }
-};
+    };
 
 
 namespace py = pybind11;

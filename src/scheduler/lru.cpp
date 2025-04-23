@@ -15,109 +15,63 @@
 struct LRUObject {
     uint64_t obj_id;
     int64_t last_access;
+    LRUObject(uint64_t obj_id, int64_t last_access) : obj_id(obj_id), last_access(last_access) {}
+};
 
-    LRUObject(const uint64_t obj_id, const int64_t last_access) {
-        this -> obj_id = obj_id;
-        this -> last_access = last_access;
-    }
-
-    bool operator < (const LRUObject& other) const {
-        return this -> last_access < other.last_access;
+// 用于 LRU 淘汰
+struct LRUCompare {
+    bool operator()(const LRUObject* a, const LRUObject* b) const {
+        // last_access小的排前面（优先淘汰）
+        if (a->last_access != b->last_access) return a->last_access < b->last_access;
+        return a->obj_id < b->obj_id;   // 排除 last_access 相同的情况
     }
 };
 
 class LRUScheduler : public Scheduler {
-    public:
-        std :: set<LRUObject> cache;
-        std::set<LRUObject, std::function<bool(const LRUObject&, const LRUObject&)>> cache_set;
+public:
+    std::set<LRUObject*, LRUCompare> cache; // LRU队列
+    std::unordered_map<uint64_t, LRUObject*> cache_map; // id 查找表
 
-        LRUScheduler(uint64_t cache_size) : Scheduler(cache_size), 
-            cache_set([](const LRUObject& a, const LRUObject& b) {
-                return a.obj_id < b.obj_id;
-            }) {
-            // We define two sets for efficiently
-            // 1. Check if an object is in the cache
-            // 2. Remove the object that has the longest time to be nextly accessed
-            this -> cache = std :: set<LRUObject>();
-        }
+    LRUScheduler(uint64_t cache_size) : Scheduler(cache_size) {}
 
-        Result run(std :: vector<Request>& requests) {
-            // Initialize the cache misses
-            auto result = Result(requests);
-            int cnt = 0;
+    ~LRUScheduler() {
+        for (auto p : cache) delete p;
+    }
 
-            // auto unique_set = std :: set<uint64_t>();
-            
-            // uint32_t counter = 0;
-            for (auto &request : requests) {
-                // counter++;
-                if (cnt % 100000 == 0) {
-                    std:: cout << "Running " << cnt << "-th request" << std::endl; 
+    Result run(std::vector<Request>& requests) {
+        auto result = Result(requests);
+
+        for (auto& request : requests) {
+            uint64_t obj_id = request.obj_id;
+            int64_t last_access = request.timestamp;
+
+            // 已经在cache中
+            auto it = cache_map.find(obj_id);
+            if (it != cache_map.end()) {
+                // 先移除旧对象
+                cache.erase(it->second);
+                delete it->second; // 删掉老对象防内存泄漏
+                cache_map.erase(it);
+            } else {
+                // miss
+                result.cache_misses++;
+                if (cache.size() == this->cache_size) {
+                    // 淘汰最旧
+                    auto oldest = *cache.begin();
+                    cache_map.erase(oldest->obj_id);
+                    cache.erase(cache.begin());
+                    delete oldest;
                 }
-                cnt++;
-                
-                auto obj_id = request.obj_id;
-                auto last_access = request.timestamp;
-
-
-                // if (counter % 10000 == 0) {
-                //     std :: cerr << "Obj: " << obj_id << " Timestamp: " << last_access << std :: endl;
-                // }
-                // unique_set.insert(obj_id);
-                // auto print_cache = [&cache = this -> cache]() {
-                //     for (auto &obj : cache) {
-                //         std :: cerr << obj.obj_id << " ";
-                //     }
-                //     std :: cerr << std :: endl;
-                // };
-
-                // print_cache();
-
-                // first we check if the object is in the cache
-                auto is_in_cache = [&cache_set = this -> cache_set](const uint64_t& obj_id) {
-                    auto it = cache_set.lower_bound(LRUObject(obj_id, 0));
-                    if (it == cache_set.end() || it -> obj_id != obj_id) {
-                        return cache_set.end();
-                    }
-                    return it;
-                };
-
-                std :: set<LRUObject> :: iterator it;
-                if ((it = is_in_cache(obj_id)) == this -> cache_set.end()) {
-                    assert (*it.obj_id != obj_id);
-                    // Not in the cache
-                    result.cache_misses++;
-
-                    // If the cache is full, remove the object that has the longest time to be nextly accessed
-                    if (this -> cache.size() == this -> cache_size) {
-                        auto evicted_obj = *this -> cache.begin();
-                        this -> cache.erase(evicted_obj);
-                        this -> cache_set.erase(evicted_obj);
-                    }
-                }
-                else {
-                    // In the cache
-                    // We need to update the next access time of the object
-
-                    // Remove the old object from the cache
-                    auto obj = *it;
-                    this -> cache.erase(obj);
-                    this -> cache_set.erase(obj);
-                }
-
-                // Insert the object into the cache
-                auto obj = LRUObject(obj_id, last_access);
-                this -> cache.insert(obj);
-                this -> cache_set.insert(obj);
-
-                // print_cache();
-                // if (counter % 10000 == 0) {
-                //     std :: cerr << "Cache misses: " << result.cache_misses << " Unique objects: " << unique_set.size() << std :: endl;
-                // }
             }
 
-            return result;
+            // 插入新对象
+            auto obj = new LRUObject(obj_id, last_access);
+            cache.insert(obj);
+            cache_map[obj_id] = obj;
         }
+
+        return result;
+    }
 };
 
 namespace py = pybind11;

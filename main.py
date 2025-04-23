@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+from sklearn.model_selection import train_test_split
 import src.data_downloader as data_downloader
 from src.input_processor import InputProcessor
 from src.utils import MyNamespace
@@ -64,16 +65,32 @@ def main():
         requests = input_processor.process_input(trace_file)
 
         if (args.algorithm == "LSTM"):
+            train_r, test_r = train_test_split(requests, test_size=0.25, shuffle=False)
             lstm = LSTM_Cache(args.cache_size, (1 << 20) - 1, N=30)
-            predict = lstm.train(requests)
+            lstm.train(train_r)
+            predict = lstm.predict(test_r)
             prediction = [False if (i < 0.5) else True for i in predict]
 
             # belady = Belady(args.cache_size)
-            # belady.initial(requests)
-            # belady.resize(len(requests))
+            # belady.initial(test_r)
+            # belady.resize(len(test_r))
             # prediction = belady.result
+            
             scheduler = LSTMScheduler(args.cache_size)
-            result = scheduler.run(requests, prediction)
+            result = scheduler.run(test_r, prediction)
+
+            opt_result = OPT(args.cache_size).run(test_r)
+            lru_result = LRU(args.cache_size).run(test_r)
+
+            print("OPT result ")
+            print(f"Total number of requests: {opt_result.total_requests}")
+            print(f"Total number of unique pages: {opt_result.unique_pages}")
+            print(f"Total number of cache misses: {opt_result.cache_misses}")
+
+            print("LRU result ")
+            print(f"Total number of requests: {lru_result.total_requests}")
+            print(f"Total number of unique pages: {lru_result.unique_pages}")
+            print(f"Total number of cache misses: {lru_result.cache_misses}")
 
         else:
             scheduler = eval(args.algorithm)(args.cache_size)

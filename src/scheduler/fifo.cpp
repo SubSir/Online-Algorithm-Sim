@@ -27,14 +27,9 @@ class FIFOScheduler : public Scheduler {
 
         Result run(std :: vector<Request>& requests) {
             // Initialize the cache misses
-            int cnt = 0;
             auto result = Result(requests);
             
             for (auto &request : requests) {
-                if (cnt % 100000 == 0) {
-                    std:: cout << "Running " << cnt << "-th request" << std::endl; 
-                }
-                cnt++;
                 auto obj = request.obj_id;
 
                 // first we check if the object is in the cache

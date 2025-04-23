@@ -74,9 +74,15 @@ class LSTM_Cache:
 
             print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
 
-        self.optimizer.zero_grad()
-        return [0] * (self.N - 1) + self.model(X).squeeze().tolist()
+            if (loss < 0.01):
+                break
 
+        self.optimizer.zero_grad()
+        # return [0] * (self.N - 1) + self.model(X).squeeze().tolist()
+
+    def predict(self, requests):
+        X = torch.tensor([i.obj_id % self.vocab_size for i in requests])
+        return [0] * (self.N - 1) + self.model(X).squeeze().tolist()
 
 # 示例使用
 if __name__ == "__main__":
@@ -92,7 +98,7 @@ if __name__ == "__main__":
 
     # 创建模型
     model = LSTM_Attention_Model(vocab_size, emb_dim, hidden_size, N)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     # 训练循环
     for epoch in range(100):
