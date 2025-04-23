@@ -48,11 +48,10 @@ class LSTM_Cache:
         self.vocab_size = vocab_size
         self.N = N
         self.model = LSTM_Attention_Model(vocab_size, emb_dim, hidden_size, N)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.001)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=0.01)
 
     def train(self, requests):
         X = torch.tensor([i.obj_id % self.vocab_size for i in requests])
-        print(X)
         belady = Belady(self.cache_size)
         belady.initial(requests)
         belady.resize(len(X))

@@ -64,10 +64,14 @@ def main():
         requests = input_processor.process_input(trace_file)
 
         if (args.algorithm == "LSTM"):
-            lstm = LSTM_Cache(args.cache_size, (1 << 20) - 1)
+            lstm = LSTM_Cache(args.cache_size, (1 << 20) - 1, N=30)
             predict = lstm.train(requests)
             prediction = [False if (i < 0.5) else True for i in predict]
 
+            # belady = Belady(args.cache_size)
+            # belady.initial(requests)
+            # belady.resize(len(requests))
+            # prediction = belady.result
             scheduler = LSTMScheduler(args.cache_size)
             result = scheduler.run(requests, prediction)
 

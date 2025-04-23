@@ -1,4 +1,4 @@
-algorithm: FIFO
+algorithm: LSTM
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/cloudphysics/
