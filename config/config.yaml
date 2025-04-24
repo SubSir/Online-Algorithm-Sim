@@ -1,6 +1,6 @@
-algorithm: LSTM
+algorithm: ISVM
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/cloudphysics/
 num_to_test: 1 
-cache_size: 512
+cache_size: 64

@@ -15,6 +15,8 @@ from src.scheduler import (
     Belady,
     LSTMScheduler,
     LSTM_Cache,
+    SVM_Cache,
+    ISVM_Cache
 )
 
 
@@ -78,6 +80,50 @@ def main():
             
             scheduler = LSTMScheduler(args.cache_size)
             result = scheduler.run(test_r, prediction)
+
+            opt_result = OPT(args.cache_size).run(test_r)
+            lru_result = LRU(args.cache_size).run(test_r)
+
+            print("OPT result ")
+            print(f"Total number of requests: {opt_result.total_requests}")
+            print(f"Total number of unique pages: {opt_result.unique_pages}")
+            print(f"Total number of cache misses: {opt_result.cache_misses}")
+
+            print("LRU result ")
+            print(f"Total number of requests: {lru_result.total_requests}")
+            print(f"Total number of unique pages: {lru_result.unique_pages}")
+            print(f"Total number of cache misses: {lru_result.cache_misses}")
+
+        elif args.algorithm == "SVM":
+            train_r, test_r = train_test_split(requests, test_size=0.75, shuffle=False)
+            svm = SVM_Cache(args.cache_size)
+            svm.train(train_r)
+            predict = svm.predict(test_r)
+
+            scheduler = LSTMScheduler(args.cache_size)
+            result = scheduler.run(test_r, predict)
+
+            opt_result = OPT(args.cache_size).run(test_r)
+            lru_result = LRU(args.cache_size).run(test_r)
+
+            print("OPT result ")
+            print(f"Total number of requests: {opt_result.total_requests}")
+            print(f"Total number of unique pages: {opt_result.unique_pages}")
+            print(f"Total number of cache misses: {opt_result.cache_misses}")
+
+            print("LRU result ")
+            print(f"Total number of requests: {lru_result.total_requests}")
+            print(f"Total number of unique pages: {lru_result.unique_pages}")
+            print(f"Total number of cache misses: {lru_result.cache_misses}")
+
+        elif args.algorithm == "ISVM":
+            train_r, test_r = train_test_split(requests, test_size=0.9, shuffle=False)
+            isvm = ISVM_Cache(args.cache_size,N=128, upper_bound=100, threhold=10)
+            isvm.train(train_r)
+            predict = isvm.predict(test_r)
+
+            scheduler = LSTMScheduler(args.cache_size)
+            result = scheduler.run(test_r, predict)
 
             opt_result = OPT(args.cache_size).run(test_r)
             lru_result = LRU(args.cache_size).run(test_r)

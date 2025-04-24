@@ -7,3 +7,4 @@ from .marking import Marking
 from .opt import OPT
 from .belady import Belady, LSTMScheduler
 from .LSTM import LSTM_Cache
+from .ISVM import SVM_Cache, ISVM_Cache
