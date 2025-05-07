@@ -15,91 +15,48 @@
 
 struct OPTObject {
     uint64_t obj_id;
-    int64_t next_access;
+    uint64_t next_access;
 
-    OPTObject(const uint64_t obj_id, const int64_t next_access) {
-        this -> obj_id = obj_id;
-        this -> next_access = next_access;
-    }
+    OPTObject(const uint64_t obj_id, const uint64_t next_access) 
+        : obj_id(obj_id), next_access(next_access) {}
 
-    bool operator < (const OPTObject& other) const {
-        return this -> next_access > other.next_access;
+    bool operator<(const OPTObject& other) const {
+        return next_access > other.next_access; // Belady 优先淘汰 future max
     }
 };
 
 class OPTScheduler : public Scheduler {
-    public:
-        std :: set<OPTObject> cache;
-        std::set<OPTObject, std::function<bool(const OPTObject&, const OPTObject&)>> cache_set;
+public:
+    std::set<OPTObject> cache;
+    std::unordered_map<uint64_t, std::set<OPTObject>::iterator> cache_map;
 
-        OPTScheduler(uint64_t cache_size) : Scheduler(cache_size), 
-            cache_set([](const OPTObject& a, const OPTObject& b) {
-                return a.obj_id < b.obj_id;
-            }) {
-            // We define two sets for efficiently
-            // 1. Check if an object is in the cache
-            // 2. Remove the object that has the longest time to be nextly accessed
-            this -> cache = std :: set<OPTObject>();
-        }
+    OPTScheduler(uint64_t cache_size) : Scheduler(cache_size) {}
 
-        Result run(std :: vector<Request>& requests) {
-            // Initialize the cache misses
-            auto result = Result(requests);
-            
-            // uint32_t counter = 0;
-            for (auto &request : requests) {
-                auto obj_id = request.obj_id;
-                auto next_access = request.next_access_vtime;
+    Result run(std::vector<Request>& requests) {
+        auto result = Result(requests);
+        for (auto& request : requests) {
+            uint64_t obj_id = request.obj_id;
+            uint64_t next_access = request.next_access_vtime;
 
-                // std :: cout << "Requesting object " << obj_id << " at " << next_access << std :: endl;
-                // counter++;
-                // if (counter == 10) {
-                //     break;
-                // }
-
-                // first we check if the object is in the cache
-                auto is_in_cache = [&cache_set = this -> cache_set](const uint64_t& obj_id) {
-                    auto it = cache_set.lower_bound(OPTObject(obj_id, 0));
-                    if (it == cache_set.end() || it -> obj_id != obj_id) {
-                        return cache_set.end();
-                    }
-                    return it;
-                };
-
-                std :: set<OPTObject> :: iterator it;
-                if ((it = is_in_cache(obj_id)) == this -> cache_set.end()) {
-                    // Not in the cache
-                    result.cache_misses++;
-
-                    // If the cache is full, remove the object that has the longest time to be nextly accessed
-                    if (this -> cache.size() == this -> cache_size) {
-                        auto evicted_obj = *this -> cache.begin();
-                        // std :: cerr << "Evicting object with next access time " << evicted_obj.next_access << std :: endl;
-                        this -> cache.erase(this -> cache.begin());
-                        this -> cache_set.erase(evicted_obj);
-                    }
+            if (cache_map.find(obj_id) == cache_map.end()) {
+                // Miss
+                result.cache_misses++;
+                if (cache.size() == this->cache_size) {
+                    auto evict_it = cache.begin();
+                    cache_map.erase(evict_it->obj_id);
+                    cache.erase(evict_it);
                 }
-                else {
-                    // In the cache
-                    // We need to update the next access time of the object
-
-                    // Remove the old object from the cache
-                    auto obj = *it;
-                    this -> cache.erase(obj);
-                    this -> cache_set.erase(it);
-                }
-
-                // Insert the object into the cache
-                auto obj = OPTObject(obj_id, next_access);
-                if (next_access != -1) {
-                    assert (obj_id != requests[next_access].obj_id);
-                }
-                this -> cache.insert(obj);
-                this -> cache_set.insert(obj);
+            } else {
+                // Hit, update
+                auto hit_it = cache_map[obj_id];
+                cache.erase(hit_it);
             }
-
-            return result;
+            // Insert/update
+            auto ins_it = cache.insert(OPTObject(obj_id, next_access)).first;
+            cache_map[obj_id] = ins_it;
         }
+        return result;
+    }
 };
 
 namespace py = pybind11;

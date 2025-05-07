@@ -12,24 +12,6 @@
 
 #include "cpp_utils.hpp"
 
-/*
-    Function to reorder the requests since there are requests with the same timestamp
-*/
-std :: vector<Request> _reorder_requests(std::vector<Request> requests) {
-    std :: map<uint64_t, uint32_t> last_access;
-
-    uint32_t counter = 0;
-    for (auto &req : requests) {
-        if (last_access.find(req.obj_id) != last_access.end()) {
-            requests[last_access[req.obj_id]].next_access_vtime = req.timestamp;
-        }
-        req.timestamp = counter++;
-        last_access[req.obj_id] = req.timestamp;
-    }
-
-    return std :: move(requests);
-}
-
 std :: vector<Request> _parse_trace(std::string trace_file) {
     std :: ifstream trace(trace_file);
 
@@ -54,7 +36,6 @@ std :: vector<Request> _parse_trace(std::string trace_file) {
     }
 
     if (trace.eof()) {
-        requests = _reorder_requests(requests);
         return std :: move(requests);
     }
     
