@@ -1,6 +1,6 @@
-algorithm: ISVM
+algorithm: SVM,ISVM,Perceptron,MultiVar,NaiveBayes,OPT,LRU
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/cloudphysics/
 num_to_test: 1 
-cache_size: 64
+cache_size: 128

@@ -7,3 +7,4 @@ output/
 data_process.py
 draw.py
 run.sh
+*.png

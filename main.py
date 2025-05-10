@@ -1,156 +1,152 @@
 import os
 import sys
 import argparse
-from sklearn.model_selection import train_test_split
-import src.data_downloader as data_downloader
-from src.input_processor import InputProcessor
-from src.utils import MyNamespace
-from src.scheduler import (
-    OPT,
-    FIFO,
-    LIFO,
-    LRU,
-    LFU,
-    Marking,
-    Belady,
-    LSTMScheduler,
-    LSTM_Cache,
-    SVM_Cache,
-    ISVM_Cache
+from sklearn.model_selection  import train_test_split
+import src.data_downloader  as data_downloader 
+from src.input_processor  import InputProcessor 
+from src.utils  import MyNamespace
+import matplotlib.pyplot as plt
+from src.scheduler  import (
+    OPT, FIFO, LIFO, LRU, LFU, Marking, Belady, LSTMScheduler,
+    LSTM_Cache, SVM_Cache, ISVM_Cache, Perceptron_Cache,
+    MultiVar_Cache, NaiveBayes_Cache
 )
-
-
+ 
 def read_config(config_file):
     with open(config_file, "r") as stream:
         try:
-            import yaml
-
-            return MyNamespace(**yaml.safe_load(stream))
+            import yaml 
+            return MyNamespace(**yaml.safe_load(stream)) 
         except yaml.YAMLError as exc:
             print(exc)
             exit(1)
-
-
+ 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config_file", type=str, default="./config/config.yaml")
-    parser.add_argument("--algorithm", type=str, default="default")
-    parser.add_argument("--cache_size", type=int, default=-1)
-    parse_args = parser.parse_args()
-    args = read_config(parse_args.config_file)
-
-    if parse_args.algorithm != "default":
-        args.algorithm = parse_args.algorithm
-    if parse_args.cache_size != -1:
-        args.cache_size = parse_args.cache_size
-
+    parser.add_argument("--config_file",  type=str, default="./config/config.yaml") 
+    parser.add_argument("--algorithm",  type=str, default="default")  # 支持多算法对比
+    parser.add_argument("--cache_size",  type=int, default=-1)
+    parse_args = parser.parse_args() 
+ 
+    args = read_config(parse_args.config_file) 
+    if parse_args.algorithm  != "default":
+        args.algorithm  = parse_args.algorithm 
+    if parse_args.cache_size  != -1:
+        args.cache_size  = parse_args.cache_size 
+ 
     print("Practical Paging Algorithm Simulator")
     print(args)
-
-    traces_list = data_downloader.download_data(args)
-
+ 
+    traces_list = data_downloader.download_data(args) 
     print("\n------------------------------------")
-
+ 
     input_processor = InputProcessor()
-    output_file = os.path.join(
-        args.output_dir, args.algorithm + f"_{args.cache_size}" + ".txt"
+ 
+    # 输出文件名
+    output_file = os.path.join( 
+        args.output_dir, 
+        f"{'_'.join(args.algorithm.split(','))}_{args.cache_size}.txt" 
     )
-
-    if not os.path.exists(output_file):
+    if not os.path.exists(output_file): 
         open(output_file, "w").close()
     else:
-        os.remove(output_file)
+        os.remove(output_file) 
         open(output_file, "w").close()
-
+ 
     for trace_file in traces_list:
         print(f"Processing {trace_file}")
-        requests = input_processor.process_input(trace_file)
-
-        if (args.algorithm == "LSTM"):
-            train_r, test_r = train_test_split(requests, test_size=0.25, shuffle=False)
-            lstm = LSTM_Cache(args.cache_size, (1 << 20) - 1, N=30)
-            lstm.train(train_r)
-            predict = lstm.predict(test_r)
-            prediction = [False if (i < 0.5) else True for i in predict]
-
-            # belady = Belady(args.cache_size)
-            # belady.initial(test_r)
-            # belady.resize(len(test_r))
-            # prediction = belady.result
-            
-            scheduler = LSTMScheduler(args.cache_size)
-            result = scheduler.run(test_r, prediction)
-
-            opt_result = OPT(args.cache_size).run(test_r)
-            lru_result = LRU(args.cache_size).run(test_r)
-
-            print("OPT result ")
-            print(f"Total number of requests: {opt_result.total_requests}")
-            print(f"Total number of unique pages: {opt_result.unique_pages}")
-            print(f"Total number of cache misses: {opt_result.cache_misses}")
-
-            print("LRU result ")
-            print(f"Total number of requests: {lru_result.total_requests}")
-            print(f"Total number of unique pages: {lru_result.unique_pages}")
-            print(f"Total number of cache misses: {lru_result.cache_misses}")
-
-        elif args.algorithm == "SVM":
-            train_r, test_r = train_test_split(requests, test_size=0.75, shuffle=False)
-            svm = SVM_Cache(args.cache_size)
-            svm.train(train_r)
-            predict = svm.predict(test_r)
-
-            scheduler = LSTMScheduler(args.cache_size)
-            result = scheduler.run(test_r, predict)
-
-            opt_result = OPT(args.cache_size).run(test_r)
-            lru_result = LRU(args.cache_size).run(test_r)
-
-            print("OPT result ")
-            print(f"Total number of requests: {opt_result.total_requests}")
-            print(f"Total number of unique pages: {opt_result.unique_pages}")
-            print(f"Total number of cache misses: {opt_result.cache_misses}")
-
-            print("LRU result ")
-            print(f"Total number of requests: {lru_result.total_requests}")
-            print(f"Total number of unique pages: {lru_result.unique_pages}")
-            print(f"Total number of cache misses: {lru_result.cache_misses}")
-
-        elif args.algorithm == "ISVM":
+        requests = input_processor.process_input(trace_file) 
+ 
+        # 如果指定了多个算法，则依次运行
+        algorithms = [alg.strip() for alg in args.algorithm.split(",")] 
+        results = {}
+ 
+        for alg in algorithms:
+            print(f"\nRunning algorithm: {alg}")
             train_r, test_r = train_test_split(requests, test_size=0.9, shuffle=False)
-            isvm = ISVM_Cache(args.cache_size,N=128, upper_bound=100, threhold=10)
-            isvm.train(train_r)
-            predict = isvm.predict(test_r)
+ 
+            if alg == "LSTM":
+                lstm = LSTM_Cache(args.cache_size,  (1 << 20) - 1, N=30)
+                lstm.train(train_r) 
+                predict = lstm.predict(test_r) 
+                prediction = [False if i < 0.5 else True for i in predict]
+                belady = Belady(args.cache_size) 
+                belady.initial(test_r) 
+                belady.resize(len(test_r)) 
+                prediction = belady.result  
+                scheduler = LSTMScheduler(args.cache_size) 
+                result = scheduler.run(test_r,  prediction)
+                results[alg] = {
+                    "total_requests": result.total_requests, 
+                    "unique_pages": result.unique_pages, 
+                    "cache_misses": result.cache_misses 
+                }
+ 
+            elif alg in ["SVM", "Perceptron", "MultiVar", "NaiveBayes"]:
+                model = eval(alg + "_Cache")(args.cache_size) 
+                model.train(train_r) 
+                predict = model.predict(test_r) 
+                scheduler = LSTMScheduler(args.cache_size) 
+                result = scheduler.run(test_r,  predict)
+                results[alg] = {
+                    "total_requests": result.total_requests, 
+                    "unique_pages": result.unique_pages, 
+                    "cache_misses": result.cache_misses 
+                }
+ 
+            elif alg == "ISVM":
+                isvm = ISVM_Cache(args.cache_size,  N=128, upper_bound=100, threhold=10)
+                isvm.train(train_r) 
+                predict = isvm.predict(test_r) 
+                scheduler = LSTMScheduler(args.cache_size) 
+                result = scheduler.run(test_r,  predict)
+                results[alg] = {
+                    "total_requests": result.total_requests, 
+                    "unique_pages": result.unique_pages, 
+                    "cache_misses": result.cache_misses  
+                }
+ 
+            else:
+                scheduler = eval(alg)(args.cache_size) 
+                result = scheduler.run(test_r) 
+                results[alg] = {
+                    "total_requests": result.total_requests, 
+                    "unique_pages": result.unique_pages, 
+                    "cache_misses": result.cache_misses  
+                }
 
-            scheduler = LSTMScheduler(args.cache_size)
-            result = scheduler.run(test_r, predict)
+        # 任选一个用于展示请求数和唯一页数
+        res = results[list(results.keys())[0]]
+        print(f"Total  number of requests: {res['total_requests']}")
+        print(f"Total  number of unique pages: {res['unique_pages']}")
 
-            opt_result = OPT(args.cache_size).run(test_r)
-            lru_result = LRU(args.cache_size).run(test_r)
+        # 准备画图数据
+        algs = list(results.keys())
+        cache_misses = [results[alg]['cache_misses'] for alg in algs]
 
-            print("OPT result ")
-            print(f"Total number of requests: {opt_result.total_requests}")
-            print(f"Total number of unique pages: {opt_result.unique_pages}")
-            print(f"Total number of cache misses: {opt_result.cache_misses}")
+        # 画柱状图
+        plt.figure(figsize=(8,5))
+        plt.bar(algs, cache_misses, color='skyblue', width=0.5)
+        plt.xlabel('Algorithm')
+        plt.ylabel('Number of Cache Misses')
+        plt.title(f'Cache Misses Comparison ({res["total_requests"]} total requests, {res["unique_pages"]} unique pages)')
+        for i, miss in enumerate(cache_misses):
+            plt.text(i, miss+1, str(miss), ha='center', va='bottom')
+        plt.ylim(0, max(cache_misses)*1.2)
+        plt.tight_layout()
+        plt.savefig("cache_misses_bar.png")
 
-            print("LRU result ")
-            print(f"Total number of requests: {lru_result.total_requests}")
-            print(f"Total number of unique pages: {lru_result.unique_pages}")
-            print(f"Total number of cache misses: {lru_result.cache_misses}")
-
-        else:
-            scheduler = eval(args.algorithm)(args.cache_size)
-            result = scheduler.run(requests)
+        for alg, res in results.items(): 
+            print(f"{alg}'s number of cache misses: {res['cache_misses']}")
 
         with open(output_file, "a") as f:
-            print(f"Total number of requests: {result.total_requests}")
-            print(f"Total number of unique pages: {result.unique_pages}")
-            print(f"Total number of cache misses: {result.cache_misses}")
-            f.write(f"Trace file: {trace_file}\n")
-            f.write(f"Total number of requests: {result.total_requests}\n")
-            f.write(f"Total number of unique pages: {result.unique_pages}\n")
-            f.write(f"Total number of cache misses: {result.cache_misses}\n")
-
-
+            f.write(f"Trace  file: {trace_file}\n")
+            for alg, res in results.items(): 
+                f.write(f"Algorithm:  {alg}\n")
+                f.write(f"Total  number of requests: {res['total_requests']}\n")
+                f.write(f"Total  number of unique pages: {res['unique_pages']}\n")
+                f.write(f"Total  number of cache misses: {res['cache_misses']}\n")
+            f.write("\n") 
+ 
 if __name__ == "__main__":
     main()
