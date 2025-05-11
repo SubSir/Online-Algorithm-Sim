@@ -1,5 +1,6 @@
 import os
 import sys
+import numpy as np
 import argparse
 from sklearn.model_selection  import train_test_split
 import src.data_downloader  as data_downloader 
@@ -66,14 +67,14 @@ def main():
             train_r, test_r = train_test_split(requests, test_size=0.9, shuffle=False)
  
             if alg == "LSTM":
-                lstm = LSTM_Cache(args.cache_size,  (1 << 20) - 1, N=30)
+                lstm = LSTM_Cache(args.cache_size,  1 << 10, N=30)
                 lstm.train(train_r) 
                 predict = lstm.predict(test_r) 
                 prediction = [False if i < 0.5 else True for i in predict]
-                belady = Belady(args.cache_size) 
-                belady.initial(test_r) 
-                belady.resize(len(test_r)) 
-                prediction = belady.result  
+                # belady = Belady(args.cache_size) 
+                # belady.initial(test_r) 
+                # belady.resize(len(test_r)) 
+                # prediction = belady.result  
                 scheduler = LSTMScheduler(args.cache_size) 
                 result = scheduler.run(test_r,  prediction)
                 results[alg] = {

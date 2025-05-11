@@ -345,6 +345,7 @@ class NaiveBayes:
         X = np.asarray(X, dtype=np.uint8)
         y = np.asarray(y)
         self.M = X.shape[1]
+        print(self.M)
 
         mask_pos = (y == 1)
         mask_neg = (y == -1)
@@ -357,6 +358,7 @@ class NaiveBayes:
         # 条件概率，若正负类全为0，避免除零出现0/0（此时概率无意义，但我们强行存1）
         self.P_x1_y1 = np.sum(X_pos, axis=0) / n_pos if n_pos > 0 else np.ones(self.M)
         self.P_x0_y1 = 1 - self.P_x1_y1
+        print(self.P_x1_y1)
         self.P_x1_y_1 = np.sum(X_neg, axis=0) / n_neg if n_neg > 0 else np.ones(self.M)
         self.P_x0_y_1 = 1 - self.P_x1_y_1
 
@@ -373,6 +375,16 @@ class NaiveBayes:
             prob2 = self.P_y_1 * np.prod(np.where(x==1, self.P_x1_y_1, 1-self.P_x1_y_1))
             # 哪个概率大
             self.lut[i] = 1 if prob1 >= prob2 else -1
+
+        import matplotlib.pyplot as plt
+        ind = np.arange(self.M)
+        width = 0.35
+        plt.bar(ind, self.P_x1_y1, width, label="P(x=1|y=1)")
+        plt.bar(ind+width, self.P_x1_y_1, width, label="P(x=1|y=-1)")
+        plt.xlabel("feature id")
+        plt.ylabel("probability")
+        plt.legend()
+        plt.savefig("naivebayes.png")
 
     def predict(self, X):
         X = np.asarray(X, dtype=np.uint8)

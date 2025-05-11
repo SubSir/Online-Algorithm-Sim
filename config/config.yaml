@@ -1,4 +1,4 @@
-algorithm: SVM,ISVM,Perceptron,MultiVar,NaiveBayes,OPT,LRU
+algorithm: NaiveBayes
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/cloudphysics/
