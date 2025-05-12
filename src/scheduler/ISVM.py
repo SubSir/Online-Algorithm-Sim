@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import copy
 
 from collections import OrderedDict
 from .belady import Belady
@@ -61,8 +62,11 @@ class SVM_Cache:
         belady.resize(N)
         X = self.preprocess(X)
         Y = np.array([1 if i else -1 for i in belady.result])
+        self.train_XY(X, Y)
+
+    def train_XY(self, X, Y):
         lr = 0.01
-        epochs = 2000
+        epochs = 300
         last_b = -1.0
 
         self.isvm = SVM(self.M)
@@ -73,7 +77,7 @@ class SVM_Cache:
             self.isvm.w -= lr * grad_w
             self.isvm.b -= lr * grad_b
 
-            print(f"Epoch {epoch}, Loss: {loss:.3f}, b: {self.isvm.b:.4f}")
+            # print(f"Epoch {epoch}, Loss: {loss:.3f}, b: {self.isvm.b:.4f}")
             if (epoch % 100 == 0):
                 if (abs((self.isvm.b - last_b) / last_b) < 0.01):
                     break
@@ -82,13 +86,40 @@ class SVM_Cache:
     def predict(self, X):
         X = self.preprocess([i.obj_id for i in X])
         return [False if i < 0 else True for i in self.isvm.svm_predict(X)]
+    
+    def predict_online(self, X, batch_size=100):
+        """
+        X_all: list, 长度N，请求（带obj_id）
+        Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
+        batch_size: int, e.g. 100
+        return: list, 预测结果
+        """
+        N = len(X)
+        belady = Belady(self.cache_size)
+        belady.initial(X)
+        belady.resize(N)
+        X_processed = self.preprocess([i.obj_id for i in X])
+        Y = np.array([1 if i else -1 for i in belady.result])
+
+        Y_pred = []
+        total = len(X)
+        for start in range(0, total, batch_size):
+            end = min(start+batch_size, total)
+            X_batch = X[start:end]
+
+            # 预测
+            Y_batch_pred = self.predict(X_batch)
+            Y_pred.extend(Y_batch_pred)
+            # 按实际label增量训练
+            self.train_XY(X_processed[start: end], Y[start: end])
+        return Y_pred
 
     def preprocess(self, X):
         lru_pc = OrderedDict()
         X_processed = []
 
         for i in range(len(X)):
-            x_i = X[i] & 0xF  # 只保留最后4个bit (16种可能)
+            x_i = int(X[i] / 4096) & (self.M - 1)  # 只保留最后4个bit (16种可能)
             # LRU操作：如果已存在先移除，插入到末尾
             if x_i in lru_pc:
                 lru_pc.pop(x_i)
@@ -107,67 +138,134 @@ class SVM_Cache:
         return X_processed
     
 class ISVM:
-    def __init__(self, M=16, threshold=60, upper_bound=100):
-        self.weight = np.zeros(M)
-        self.threshold = threshold
+    def __init__(self, upper_bound=100):
+        self.weight = {}
         self.upper_bound = upper_bound
 
-    def svm_update(self, X, y):
-        # X: [N, M], 元素0或1
-        # y: [N], 元素-1或1
-        for i in range(X.shape[0]):
-            xi = X[i]
-            yi = y[i]
-            if yi == 1:
-                score = np.dot(self.weight, xi)
-                if score < self.upper_bound:
-                    self.weight += xi
+    def svm_update_one(self, x, y):
+        score = 0
+        for i in x:
+            if i not in self.weight:
+                self.weight[i] = 0
+            score += self.weight[i]
+        if score < self.upper_bound and score > -self.upper_bound:
+            for i in x:
+                self.weight[i] -= y
 
     def svm_predict(self, x):
         # X: [N]
-        score = np.dot(self.weight, x)
-        if score > self.threshold:
-            return False
-        else:
-            return True
+        score = 0
+        for i in x:
+            if i not in self.weight:
+                self.weight[i] = 0
+            score += self.weight[i]
+        return score
+        
     
 class ISVM_Cache:
-    def __init__(self, cache_size, k=5, N=32, M=16, threhold=60, upper_bound=100):
+    def __init__(self, cache_size, k=5, upper_bound=100):
         self.cache_size = cache_size
         self.k = k
-        self.N = N
-        self.M = M
-        self.threhold = threhold
         self.upper_bound = upper_bound
-        self.isvm_table = [ISVM(M,threhold, upper_bound) for _ in range(N)]
-
-    def train(self, requests):
-        X = [i.obj_id for i in requests]
+        self.isvm_table = {}
+    
+    def predict_online(self, X):
+        """
+        X_all: list, 长度N，请求（带obj_id）
+        Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
+        batch_size: int, e.g. 100
+        return: list, 预测结果
+        """
+        Y_pred = []
+        total = len(X)
         belady = Belady(self.cache_size)
-        belady.initial(requests)
+        belady.initial(X)
         belady.resize(len(X))
-        Y = np.array([-1 if i else 1 for i in belady.result])
-        X_hash, Y_hash = self.preprocess(X,Y)
-
-        for i in range(self.N):
-            self.isvm_table[i].svm_update(X_hash[i], Y_hash[i])
-
-    def predict(self, X):
-        X = [i.obj_id for i in X]
-        X_processed = self.preprocess_X(X)
-
-        Y = []
-        for i in range(len(X)):
-            Y.append(self.isvm_table[X[i] % self.N].svm_predict(X_processed[i]))
-        
-        return Y
-
+        X1 = [i.obj_id for i in X]
+        X_processed = self.preprocess_X(X1)
+        Y_processed = [-1 if i else 1 for i in belady.result]
+        for i in range(0, total):
+            # 预测
+            if X1[i] not in self.isvm_table:
+                self.isvm_table[X1[i]] = ISVM(self.upper_bound)
+            Y_pred.append(self.isvm_table[X1[i]].svm_predict(X_processed[i]))
+            # 按实际label增量训练
+            self.isvm_table[X1[i]].svm_update_one(X_processed[i], Y_processed[i])
+        return Y_pred
+    
     def preprocess_X(self, X):
         lru_pc = OrderedDict()
         X_processed = []
 
         for i in range(len(X)):
-            x_i = X[i] & 0xF  # 只保留最后4个bit (16种可能)
+            x_i = X[i]
+            vec = list(lru_pc.keys())
+            X_processed.append(copy.deepcopy(vec))
+
+            # LRU操作：如果已存在先移除，插入到末尾
+            if x_i in lru_pc:
+                lru_pc.pop(x_i)
+            lru_pc[x_i] = True
+            # 如果超过5个，移除最早插入的
+            if len(lru_pc) > self.k:
+                lru_pc.popitem(last=False)
+
+        return X_processed
+
+
+class ISVM2:
+    def __init__(self, M=16, upper_bound=100):
+        self.weight = np.zeros(M)
+        self.upper_bound = upper_bound
+
+    def svm_update_one(self, x, y):
+        score = np.dot(self.weight, x)
+        if score < self.upper_bound and score > -self.upper_bound:
+            self.weight -= x * y
+
+    def svm_predict(self, x):
+        # X: [N]
+        return int(np.dot(self.weight, x))
+        
+    
+class ISVM_Cache2:
+    def __init__(self, cache_size, k=5, N=32, M=128, upper_bound=100):
+        self.cache_size = cache_size
+        self.k = k
+        self.N = N
+        self.M = M
+        self.upper_bound = upper_bound
+        self.isvm_table = [ISVM2(M, upper_bound) for _ in range(N)]
+    
+    def predict_online(self, X):
+        """
+        X_all: list, 长度N，请求（带obj_id）
+        Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
+        batch_size: int, e.g. 100
+        return: list, 预测结果
+        """
+        Y_pred = []
+        total = len(X)
+        belady = Belady(self.cache_size)
+        belady.initial(X)
+        belady.resize(len(X))
+        X1 = [i.obj_id for i in X]
+        X_processed = self.preprocess_X(X1)
+        Y_processed = [-1 if i else 1 for i in belady.result]
+        for i in range(0, total):
+
+            # 预测
+            Y_pred.append(self.isvm_table[X1[i] % self.N].svm_predict(X_processed[i]))
+            # 按实际label增量训练
+            self.isvm_table[X1[i] % self.N].svm_update_one(X_processed[i], Y_processed[i])
+        return Y_pred
+    
+    def preprocess_X(self, X):
+        lru_pc = OrderedDict()
+        X_processed = []
+
+        for i in range(len(X)):
+            x_i = int(X[i] / 4096) & (self.M -1)  # 只保留最后4个bit (16种可能)
             # LRU操作：如果已存在先移除，插入到末尾
             if x_i in lru_pc:
                 lru_pc.pop(x_i)
@@ -185,43 +283,12 @@ class ISVM_Cache:
         X_processed = np.array(X_processed)
         return X_processed
 
-    def preprocess(self, X, Y):
-        lru_pc = OrderedDict()
-        X_hash = []
-        Y_hash = []
-
-        for i in range(self.N):
-            X_hash.append([])
-            Y_hash.append([])
-
-        for i in range(len(X)):
-            x_i = X[i] & 0xF  # 只保留最后4个bit (16种可能)
-            # LRU操作：如果已存在先移除，插入到末尾
-            if x_i in lru_pc:
-                lru_pc.pop(x_i)
-            lru_pc[x_i] = True
-            # 如果超过5个，移除最早插入的
-            if len(lru_pc) > self.k:
-                lru_pc.popitem(last=False)
-
-            # 构建16维向量
-            vec = np.zeros(self.M, dtype=int)
-            for key in lru_pc.keys():
-                vec[key] = 1
-            X_hash[X[i] % self.N].append(vec)
-            Y_hash[X[i] % self.N].append(Y[i])
-
-        for i in range(self.N):
-            X_hash[i] = np.array(X_hash[i])
-            Y_hash[i] = np.array(Y_hash[i])
-        return X_hash, Y_hash
-
 class Perceptron:
     def __init__(self, M):
         self.w = np.zeros(M)
         self.b = 0.0
 
-    def fit(self, X, y, epochs=10):
+    def fit(self, X, y, epochs=100):
         for _ in range(epochs):
             for xi, yi in zip(X, y):
                 if yi * (xi @ self.w + self.b) <= 0:
@@ -259,7 +326,7 @@ class Perceptron_Cache:
         X_processed = []
 
         for i in range(len(X)):
-            x_i = X[i] & 0xF  # 只保留最后4个bit (16种可能)
+            x_i = int(X[i] / 4096) & (self.M - 1)  # 只保留最后4个bit (16种可能)
             # LRU操作：如果已存在先移除，插入到末尾
             if x_i in lru_pc:
                 lru_pc.pop(x_i)
@@ -318,7 +385,7 @@ class MultiVar_Cache:
         X_processed = []
 
         for i in range(len(X)):
-            x_i = X[i] & 0xF  # 只保留最后4个bit (16种可能)
+            x_i = int(X[i] / 4096) & (self.M - 1)  # 只保留最后4个bit (16种可能)
             # LRU操作：如果已存在先移除，插入到末尾
             if x_i in lru_pc:
                 lru_pc.pop(x_i)
@@ -345,7 +412,6 @@ class NaiveBayes:
         X = np.asarray(X, dtype=np.uint8)
         y = np.asarray(y)
         self.M = X.shape[1]
-        print(self.M)
 
         mask_pos = (y == 1)
         mask_neg = (y == -1)
@@ -358,7 +424,6 @@ class NaiveBayes:
         # 条件概率，若正负类全为0，避免除零出现0/0（此时概率无意义，但我们强行存1）
         self.P_x1_y1 = np.sum(X_pos, axis=0) / n_pos if n_pos > 0 else np.ones(self.M)
         self.P_x0_y1 = 1 - self.P_x1_y1
-        print(self.P_x1_y1)
         self.P_x1_y_1 = np.sum(X_neg, axis=0) / n_neg if n_neg > 0 else np.ones(self.M)
         self.P_x0_y_1 = 1 - self.P_x1_y_1
 
@@ -411,13 +476,33 @@ class NaiveBayes_Cache:
     def predict(self, X):
         X = self.preprocess([i.obj_id for i in X])
         return [False if i < 0 else True for i in self.naivebayes.predict(X)]
+    
+    def predict_online(self, X, batch_size=100):
+        """
+        X_all: list, 长度N，请求（带obj_id）
+        Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
+        batch_size: int, e.g. 100
+        return: list, 预测结果
+        """
+        Y_pred = []
+        total = len(X)
+        for start in range(0, total, batch_size):
+            end = min(start+batch_size, total)
+            X_batch = X[start:end]
+
+            # 预测
+            Y_batch_pred = self.predict(X_batch)
+            Y_pred.extend(Y_batch_pred)
+            # 按实际label增量训练
+            self.train(X_batch)
+        return Y_pred
 
     def preprocess(self, X):
         lru_pc = OrderedDict()
         X_processed = []
 
         for i in range(len(X)):
-            x_i = X[i] & 0xF  # 只保留最后4个bit (16种可能)
+            x_i = int(X[i] / 4096) & (self.M - 1)  # 只保留最后4个bit (16种可能)
             # LRU操作：如果已存在先移除，插入到末尾
             if x_i in lru_pc:
                 lru_pc.pop(x_i)

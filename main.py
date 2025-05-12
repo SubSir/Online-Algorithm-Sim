@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from src.scheduler  import (
     OPT, FIFO, LIFO, LRU, LFU, Marking, Belady, LSTMScheduler,
     LSTM_Cache, SVM_Cache, ISVM_Cache, Perceptron_Cache,
-    MultiVar_Cache, NaiveBayes_Cache
+    MultiVar_Cache, NaiveBayes_Cache, ISVM_Cache2
 )
  
 def read_config(config_file):
@@ -57,24 +57,27 @@ def main():
     for trace_file in traces_list:
         print(f"Processing {trace_file}")
         requests = input_processor.process_input(trace_file) 
- 
+
         # 如果指定了多个算法，则依次运行
         algorithms = [alg.strip() for alg in args.algorithm.split(",")] 
         results = {}
  
+        train_r, _ = train_test_split(requests, test_size=0.9, shuffle=False)
+        test_r = requests
         for alg in algorithms:
             print(f"\nRunning algorithm: {alg}")
-            train_r, test_r = train_test_split(requests, test_size=0.9, shuffle=False)
- 
+
+            belady = Belady(args.cache_size) 
+            belady.initial(test_r) 
+            belady.resize(len(test_r)) 
             if alg == "LSTM":
-                lstm = LSTM_Cache(args.cache_size,  1 << 10, N=30)
-                lstm.train(train_r) 
-                predict = lstm.predict(test_r) 
-                prediction = [False if i < 0.5 else True for i in predict]
-                # belady = Belady(args.cache_size) 
-                # belady.initial(test_r) 
-                # belady.resize(len(test_r)) 
-                # prediction = belady.result  
+                # lstm = LSTM_Cache(args.cache_size,  1 << 10, N=30)
+                # lstm.train(train_r) 
+                # predict = lstm.predict(test_r) 
+                # prediction = [False if i < 0.5 else True for i in predict]
+                
+                prediction = belady.result  
+                print(np.mean(prediction))
                 scheduler = LSTMScheduler(args.cache_size) 
                 result = scheduler.run(test_r,  prediction)
                 results[alg] = {
@@ -86,7 +89,7 @@ def main():
             elif alg in ["SVM", "Perceptron", "MultiVar", "NaiveBayes"]:
                 model = eval(alg + "_Cache")(args.cache_size) 
                 model.train(train_r) 
-                predict = model.predict(test_r) 
+                predict = model.predict_online(test_r) 
                 scheduler = LSTMScheduler(args.cache_size) 
                 result = scheduler.run(test_r,  predict)
                 results[alg] = {
@@ -96,9 +99,23 @@ def main():
                 }
  
             elif alg == "ISVM":
-                isvm = ISVM_Cache(args.cache_size,  N=128, upper_bound=100, threhold=10)
-                isvm.train(train_r) 
-                predict = isvm.predict(test_r) 
+                isvm = ISVM_Cache(args.cache_size, upper_bound=30, k=30)
+                # isvm.predict_online(train_r) 
+                predict = isvm.predict_online(test_r) 
+                # print(predict)
+                scheduler = LSTMScheduler(args.cache_size) 
+                result = scheduler.run(test_r,  predict)
+                results[alg] = {
+                    "total_requests": result.total_requests, 
+                    "unique_pages": result.unique_pages, 
+                    "cache_misses": result.cache_misses  
+                }
+
+            elif alg == "ISVM2":
+                isvm = ISVM_Cache2(args.cache_size, upper_bound=30, k=30, N=1024,M=16)
+                # isvm.predict_online(train_r) 
+                predict = isvm.predict_online(test_r) 
+                # print(predict)
                 scheduler = LSTMScheduler(args.cache_size) 
                 result = scheduler.run(test_r,  predict)
                 results[alg] = {

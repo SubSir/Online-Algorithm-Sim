@@ -37,14 +37,19 @@ public:
         for (auto& request : requests) {
             uint64_t obj_id = request.obj_id;
             uint64_t next_access = request.next_access_vtime;
+            bool insert = true;
 
             if (cache_map.find(obj_id) == cache_map.end()) {
                 // Miss
                 result.cache_misses++;
                 if (cache.size() == this->cache_size) {
                     auto evict_it = cache.begin();
-                    cache_map.erase(evict_it->obj_id);
-                    cache.erase(evict_it);
+                    if (evict_it->next_access >= next_access) {
+                        cache_map.erase(evict_it->obj_id);
+                        cache.erase(evict_it);
+                    } else {
+                        insert = false;
+                    }
                 }
             } else {
                 // Hit, update
@@ -52,8 +57,10 @@ public:
                 cache.erase(hit_it);
             }
             // Insert/update
-            auto ins_it = cache.insert(OPTObject(obj_id, next_access)).first;
-            cache_map[obj_id] = ins_it;
+            if (insert) {
+                auto ins_it = cache.insert(OPTObject(obj_id, next_access)).first;
+                cache_map[obj_id] = ins_it;
+            }
         }
         return result;
     }

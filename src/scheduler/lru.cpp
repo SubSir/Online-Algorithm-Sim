@@ -40,10 +40,11 @@ public:
 
     Result run(std::vector<Request>& requests) {
         auto result = Result(requests);
+        uint64_t idx = 0;
 
         for (auto& request : requests) {
             uint64_t obj_id = request.obj_id;
-            int64_t last_access = request.timestamp;
+            int64_t last_access = idx++;
 
             // 已经在cache中
             auto it = cache_map.find(obj_id);

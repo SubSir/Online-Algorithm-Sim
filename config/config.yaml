@@ -1,6 +1,6 @@
-algorithm: NaiveBayes
+algorithm: LSTM,ISVM,ISVM2,OPT,LRU
 dataset_path: dataset
 output_dir: output
-dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/cloudphysics/
-num_to_test: 1 
-cache_size: 128
+dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/fiu/
+num_to_test: 4
+cache_size: 64

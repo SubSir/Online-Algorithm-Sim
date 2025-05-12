@@ -33,10 +33,10 @@ struct OPTObject {
 
 struct OPTObject2 {
     uint64_t obj_id;
-    bool prediction;
+    int prediction;
     uint64_t insert_time;
 
-    OPTObject2(const uint64_t obj_id, const bool prediction, uint64_t insert_time)
+    OPTObject2(const uint64_t obj_id, const int prediction, uint64_t insert_time)
         : obj_id(obj_id), prediction(prediction), insert_time(insert_time) {}
 
     bool operator < (const OPTObject2& other) const {
@@ -76,18 +76,24 @@ private:
     void process(Request& request) {
         uint64_t obj_id = request.obj_id;
         uint64_t next_access = request.next_access_vtime;
+        bool insert = true;
 
         auto it = cache_map.find(obj_id);
         if (it == cache_map.end()) {
             // 没有命中cache，考虑淘汰
             if (cache.size() == cache_size) {
                 auto evicted = *cache.begin();
-                cache_map.erase(evicted.obj_id);
-                cache.erase(cache.begin());
-                // 标记被淘汰位置
-                if (evicted.insert_time >= result.size())
-                    result.resize(evicted.insert_time + 1);
-                result[evicted.insert_time] = true;
+                if (evicted.next_access >= next_access) {
+                    cache_map.erase(evicted.obj_id);
+                    cache.erase(cache.begin());
+                    // 标记被淘汰位置
+                    if (evicted.insert_time >= result.size())
+                        result.resize(evicted.insert_time + 1);
+                    result[evicted.insert_time] = true;
+                } else {
+                    insert = false;
+                    result[pos] = true;
+                }
             }
         } else {
             // 命中cache，需要先删除旧条目
@@ -95,26 +101,29 @@ private:
             cache_map.erase(it);
         }
         // 更新到cache和cache_map
-        auto ins = cache.insert(OPTObject(obj_id, next_access, pos)).first;
-        cache_map[obj_id] = ins;
+        if (insert){
+            auto ins = cache.insert(OPTObject(obj_id, next_access, pos)).first;
+            cache_map[obj_id] = ins;
+        }
         pos++;
     }
 };
 class LSTMScheduler {
     public:
-        uint64_t pos = 0;
         uint64_t cache_size;
         std::set<OPTObject2> cache; // 按 prediction、insert_time 排序
         std::unordered_map<uint64_t, std::set<OPTObject2>::iterator> cache_map;
     
         LSTMScheduler(uint64_t cache_size) : cache_size(cache_size) {}
     
-        Result run(std::vector<Request>& requests, std::vector<bool>& predictions) {
+        Result run(std::vector<Request>& requests, std::vector<int>& predictions) {
+            uint64_t pos = 0;
             auto result = Result(requests);
     
             for (const auto& request : requests) {
                 uint64_t obj_id = request.obj_id;
-                bool pred = predictions[pos];
+                int pred = predictions[pos];
+                // bool insert = true;
     
                 auto it = cache_map.find(obj_id);
     
@@ -124,16 +133,22 @@ class LSTMScheduler {
                     // 缓存满了，淘汰优先策略元素
                     if (cache.size() == cache_size) {
                         auto evict_it = cache.begin();
-                        cache_map.erase(evict_it->obj_id);
-                        cache.erase(evict_it);
+                        // if (evict_it->prediction >= pred) {
+                            cache_map.erase(evict_it->obj_id);
+                            cache.erase(evict_it);
+                        // } else {
+                        //     insert = false;
+                        // }
                     }
                 } else {
                     // In cache，需更新 prediction, insert_time
                     cache.erase(it->second); // 先移除旧元素
                 }
                 // 插入新元素，并同步 map
-                auto ins = cache.insert(OPTObject2(obj_id, pred, pos)).first;
-                cache_map[obj_id] = ins;
+                // if (insert) {
+                    auto ins = cache.insert(OPTObject2(obj_id, pred, pos)).first;
+                    cache_map[obj_id] = ins;
+                // }
                 pos++;
             }
     
