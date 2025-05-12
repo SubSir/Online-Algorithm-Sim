@@ -1,4 +1,4 @@
-algorithm: LSTM,ISVM,ISVM2,OPT,LRU
+algorithm: SVM,OPT,LRU
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/fiu/

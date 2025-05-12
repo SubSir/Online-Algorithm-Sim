@@ -10,88 +10,58 @@ class SVM:
     def __init__(self, M):
         self.w = np.zeros(M)
         self.b = 0.0
+        self.lr = 0.01
 
-    def svm_forward(self, X, y):
+    def svm_forward(self, x, y):
         """
-        X: (N, M)
-        y: (N,)
-        w: (M,)
-        b: scalar
+        x: (M,)
+        y: 标量 (+1或-1)
         返回: loss, f
         """
-        f = X @ self.w + self.b  # (N,)
-        margins = 1 - y * f
-        losses = np.maximum(0, margins)
-        loss = np.mean(losses)
+        f = np.dot(x, self.w) + self.b   # 标量
+        margin = 1 - y * f               # 标量
+        loss = max(0.0, margin)
         return loss, f
-
-    def svm_backward(self, X, y, f):
+    
+    def svm_backward(self, x, y, f):
         """
-        X: (N, M)
-        y: (N,)
-        f: (N,)
+        x: (M,)
+        y: 标量
+        f: 标量
         返回: grad_w: (M,), grad_b: 标量
         """
-        _, M = X.shape
-        mask = (1 - y * f) > 0  # 违背margin的样本
-        # w的梯度
-        grad_w = (
-            -np.mean(y[mask, None] * X[mask], axis=0) if np.any(mask) else np.zeros(M)
-        )
-        # b的梯度
-        grad_b = -np.mean(y[mask]) if np.any(mask) else 0.0
+        if 1 - y * f > 0:
+            grad_w = -y * x
+            grad_b = -y
+        else:
+            grad_w = np.zeros_like(self.w)
+            grad_b = 0.0
         return grad_w, grad_b
 
-    def svm_predict(self, X):
-        preds = np.sign(X @ self.w + self.b)
-        preds[preds == 0] = 1
-        return preds.reshape(-1, 1)
+    def update_one(self, x, y):
+        _, f = self.svm_forward(x, y)
+        grad_w, grad_b = self.svm_backward(x, y, f)
+        self.w -= self.lr * grad_w
+        self.b -= self.lr * grad_b
+
+    def svm_predict(self, x):
+        """
+        x: (M,)
+        返回: f = x @ w + b，float类型
+        """
+        return float(np.dot(x, self.w) + self.b)
 
 class SVM_Cache:
     def __init__(self, cache_size, k=5, M=16):
         self.cache_size = cache_size
         self.k = k
         self.M = M
-        self.isvm = None
+        self.svm_table = {}
 
-    def train(self, requests):
-        X = [i.obj_id for i in requests]
-        N = len(X)
-        belady = Belady(self.cache_size)
-        belady.initial(requests)
-        belady.resize(N)
-        X = self.preprocess(X)
-        Y = np.array([1 if i else -1 for i in belady.result])
-        self.train_XY(X, Y)
-
-    def train_XY(self, X, Y):
-        lr = 0.01
-        epochs = 300
-        last_b = -1.0
-
-        self.isvm = SVM(self.M)
-
-        for epoch in range(epochs):
-            loss, f = self.isvm.svm_forward(X, Y)
-            grad_w, grad_b = self.isvm.svm_backward(X, Y, f)
-            self.isvm.w -= lr * grad_w
-            self.isvm.b -= lr * grad_b
-
-            # print(f"Epoch {epoch}, Loss: {loss:.3f}, b: {self.isvm.b:.4f}")
-            if (epoch % 100 == 0):
-                if (abs((self.isvm.b - last_b) / last_b) < 0.01):
-                    break
-                last_b = self.isvm.b
-
-    def predict(self, X):
-        X = self.preprocess([i.obj_id for i in X])
-        return [False if i < 0 else True for i in self.isvm.svm_predict(X)]
-    
-    def predict_online(self, X, batch_size=100):
+    def predict_online(self, X):
         """
         X_all: list, 长度N，请求（带obj_id）
         Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
-        batch_size: int, e.g. 100
         return: list, 预测结果
         """
         N = len(X)
@@ -103,15 +73,15 @@ class SVM_Cache:
 
         Y_pred = []
         total = len(X)
-        for start in range(0, total, batch_size):
-            end = min(start+batch_size, total)
-            X_batch = X[start:end]
-
+        for i in range(0, total):
             # 预测
-            Y_batch_pred = self.predict(X_batch)
-            Y_pred.extend(Y_batch_pred)
+            xi = X[i].obj_id
+            if xi not in self.svm_table:
+                self.svm_table[xi] = SVM(self.M)
+            Y_pred.append(int(self.svm_table[xi].svm_predict(X_processed[i]) * 1000))
             # 按实际label增量训练
-            self.train_XY(X_processed[start: end], Y[start: end])
+            self.svm_table[xi].update_one(X_processed[i], Y[i])
+
         return Y_pred
 
     def preprocess(self, X):
@@ -229,13 +199,12 @@ class ISVM2:
         
     
 class ISVM_Cache2:
-    def __init__(self, cache_size, k=5, N=32, M=128, upper_bound=100):
+    def __init__(self, cache_size, k=5, M=128, upper_bound=100):
         self.cache_size = cache_size
         self.k = k
-        self.N = N
         self.M = M
         self.upper_bound = upper_bound
-        self.isvm_table = [ISVM2(M, upper_bound) for _ in range(N)]
+        self.isvm_table = {}
     
     def predict_online(self, X):
         """
@@ -255,9 +224,11 @@ class ISVM_Cache2:
         for i in range(0, total):
 
             # 预测
-            Y_pred.append(self.isvm_table[X1[i] % self.N].svm_predict(X_processed[i]))
+            if X1[i] not in self.isvm_table:
+                self.isvm_table[X1[i]] = ISVM2(self.M, self.upper_bound)
+            Y_pred.append(self.isvm_table[X1[i]].svm_predict(X_processed[i]))
             # 按实际label增量训练
-            self.isvm_table[X1[i] % self.N].svm_update_one(X_processed[i], Y_processed[i])
+            self.isvm_table[X1[i]].svm_update_one(X_processed[i], Y_processed[i])
         return Y_pred
     
     def preprocess_X(self, X):
@@ -304,7 +275,7 @@ class Perceptron_Cache:
         self.cache_size = cache_size
         self.M = M
         self.k = k
-        self.perceptron = Perceptron(M)
+        self.perceptron_table = {}
 
     def train(self, requests):
         X = [i.obj_id for i in requests]

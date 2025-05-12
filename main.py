@@ -77,7 +77,6 @@ def main():
                 # prediction = [False if i < 0.5 else True for i in predict]
                 
                 prediction = belady.result  
-                print(np.mean(prediction))
                 scheduler = LSTMScheduler(args.cache_size) 
                 result = scheduler.run(test_r,  prediction)
                 results[alg] = {
@@ -88,7 +87,6 @@ def main():
  
             elif alg in ["SVM", "Perceptron", "MultiVar", "NaiveBayes"]:
                 model = eval(alg + "_Cache")(args.cache_size) 
-                model.train(train_r) 
                 predict = model.predict_online(test_r) 
                 scheduler = LSTMScheduler(args.cache_size) 
                 result = scheduler.run(test_r,  predict)
@@ -112,7 +110,7 @@ def main():
                 }
 
             elif alg == "ISVM2":
-                isvm = ISVM_Cache2(args.cache_size, upper_bound=30, k=30, N=1024,M=16)
+                isvm = ISVM_Cache2(args.cache_size, upper_bound=30, k=30, M=16)
                 # isvm.predict_online(train_r) 
                 predict = isvm.predict_online(test_r) 
                 # print(predict)
