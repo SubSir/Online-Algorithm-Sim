@@ -1,6 +1,6 @@
-algorithm: SVM,OPT,LRU
+algorithm: NaiveBayes,MultiVar,Perceptron,SVM,ISVM,ISVM2,OPT,LRU
 dataset_path: dataset
 output_dir: output
 dataset_url: https://ftp.pdl.cmu.edu/pub/datasets/twemcacheWorkload/cacheDatasets/fiu/
-num_to_test: 4
+num_to_test: 8
 cache_size: 64

@@ -158,7 +158,7 @@ class ISVM_Cache:
             # 预测
             if X1[i] not in self.isvm_table:
                 self.isvm_table[X1[i]] = ISVM(self.upper_bound)
-            Y_pred.append(self.isvm_table[X1[i]].svm_predict(X_processed[i]))
+            Y_pred.append(self.isvm_table[X1[i]].svm_predict(X_processed[i]) // 50)
             # 按实际label增量训练
             self.isvm_table[X1[i]].svm_update_one(X_processed[i], Y_processed[i])
         return Y_pred
@@ -259,16 +259,23 @@ class Perceptron:
         self.w = np.zeros(M)
         self.b = 0.0
 
-    def fit(self, X, y, epochs=100):
-        for _ in range(epochs):
-            for xi, yi in zip(X, y):
-                if yi * (xi @ self.w + self.b) <= 0:
-                    self.w += yi * xi
-                    self.b += yi
+    def fit_one(self, x, y):
+        """
+        x: (M,)
+        y: 标量（+1或-1）
+        单样本感知机在线更新
+        """
+        if y * (np.dot(x, self.w) + self.b) <= 0:
+            self.w += y * x
+            self.b += y
 
-    def predict(self, X):
-        return np.sign(X @ self.w + self.b).reshape(-1, 1)
-
+    def predict_one(self, x):
+        """
+        x: (M,)
+        输出预测标签（+1或-1），如等于0返回1
+        """
+        return np.dot(x, self.w) + self.b
+        
 
 class Perceptron_Cache:
     def __init__(self, cache_size,  k=5,M=16):
@@ -277,20 +284,31 @@ class Perceptron_Cache:
         self.k = k
         self.perceptron_table = {}
 
-    def train(self, requests):
-        X = [i.obj_id for i in requests]
+    def predict_online(self, X):
+        """
+        X_all: list, 长度N，请求（带obj_id）
+        Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
+        return: list, 预测结果
+        """
         N = len(X)
         belady = Belady(self.cache_size)
-        belady.initial(requests)
+        belady.initial(X)
         belady.resize(N)
-        X = self.preprocess(X)
+        X_processed = self.preprocess([i.obj_id for i in X])
         Y = np.array([1 if i else -1 for i in belady.result])
-        epochs = 200
-        self.perceptron.fit(X, Y, epochs)
 
-    def predict(self, X):
-        X = self.preprocess([i.obj_id for i in X])
-        return [False if i < 0 else True for i in self.perceptron.predict(X)]
+        Y_pred = []
+        total = len(X)
+        for i in range(0, total):
+            # 预测
+            xi = X[i].obj_id
+            if xi not in self.perceptron_table:
+                self.perceptron_table[xi] = Perceptron(self.M)
+            Y_pred.append(int(self.perceptron_table[xi].predict_one(X_processed[i])))
+            # 按实际label增量训练
+            self.perceptron_table[xi].fit_one(X_processed[i], Y[i])
+
+        return Y_pred
 
     def preprocess(self, X):
         lru_pc = OrderedDict()
@@ -316,40 +334,67 @@ class Perceptron_Cache:
         return X_processed
     
 class MultiVariableLinearClassifier:
-    def fit(self, X, y):
-        # 直接用贝叶斯推理里的概率差“赋权”，也支持直接用最小二乘
-        freq_1 = (X[y==1].mean(axis=0))
-        freq_m1 = (X[y==-1].mean(axis=0))
-        self.w = freq_1 - freq_m1
-        # 或者直接最小二乘法
-        # self.w, *rest = np.linalg.lstsq(X, y, rcond=None)[0:2]
-        self.b = 0  # 可以省略b，或设为类均值偏置
+    def __init__(self, M):
+        self.M = M
+        self.sum_1 = np.zeros(M)
+        self.sum_m1 = np.zeros(M)
+        self.count_1 = 0
+        self.count_m1 = 0
+        self.w = np.zeros(M)
 
-    def predict(self, X):
-        score = X @ self.w + self.b
-        pred = np.where(score > 0, 1, -1)
-        return pred.reshape(-1,1)
+    def fit_one(self, x, y):
+        """
+        x: (M,)
+        y: 1 或 -1
+        """
+        if y == 1:
+            self.sum_1 += x
+            self.count_1 += 1
+        elif y == -1:
+            self.sum_m1 += x
+            self.count_m1 += 1
+        # 更新参数（当前均值差）：
+        if self.count_1 > 0 and self.count_m1 > 0:
+            freq_1 = self.sum_1 / self.count_1
+            freq_m1 = self.sum_m1 / self.count_m1
+            self.w = freq_1 - freq_m1
+
+    def predict_one(self, x):
+        score = np.dot(x, self.w)
+        return score
     
 class MultiVar_Cache:
     def __init__(self, cache_size,  k=5,M=16):
         self.cache_size = cache_size
         self.k = k
         self.M = M
-        self.perceptron = MultiVariableLinearClassifier()
+        self.multivar_table = {}
 
-    def train(self, requests):
-        X = [i.obj_id for i in requests]
+    def predict_online(self, X):
+        """
+        X_all: list, 长度N，请求（带obj_id）
+        Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
+        return: list, 预测结果
+        """
         N = len(X)
         belady = Belady(self.cache_size)
-        belady.initial(requests)
+        belady.initial(X)
         belady.resize(N)
-        X = self.preprocess(X)
+        X_processed = self.preprocess([i.obj_id for i in X])
         Y = np.array([1 if i else -1 for i in belady.result])
-        self.perceptron.fit(X, Y)
 
-    def predict(self, X):
-        X = self.preprocess([i.obj_id for i in X])
-        return [False if i < 0 else True for i in self.perceptron.predict(X)]
+        Y_pred = []
+        total = len(X)
+        for i in range(0, total):
+            # 预测
+            xi = X[i].obj_id
+            if xi not in self.multivar_table:
+                self.multivar_table[xi] = MultiVariableLinearClassifier(self.M)
+            Y_pred.append(int(self.multivar_table[xi].predict_one(X_processed[i])))
+            # 按实际label增量训练
+            self.multivar_table[xi].fit_one(X_processed[i], Y[i])
+
+        return Y_pred
 
     def preprocess(self, X):
         lru_pc = OrderedDict()
@@ -375,97 +420,92 @@ class MultiVar_Cache:
         return X_processed
 
 class NaiveBayes:
-    def fit(self, X, y):
-        '''
-        X: (N, M), 0/1
-        y: (N,), -1/1
-        '''
-        X = np.asarray(X, dtype=np.uint8)
-        y = np.asarray(y)
-        self.M = X.shape[1]
+    def __init__(self, M):
+        self.M = M
+        # 初始化计数器
+        self.count_y1 = 0         # y=1的样本数
+        self.count_yneg1 = 0      # y=-1的样本数
+        self.count_x_y1 = np.zeros(M, dtype=np.int32)     # x=1且y=1的次数
+        self.count_x_yneg1 = np.zeros(M, dtype=np.int32)  # x=1且y=-1的次数
 
-        mask_pos = (y == 1)
-        mask_neg = (y == -1)
-        X_pos = X[mask_pos]
-        X_neg = X[mask_neg]
+    def fit_one(self, x, y):
+        """
+        x: (M,), 0/1
+        y: -1 或 1
+        """
+        if y==1:
+            self.count_y1 += 1
+            self.count_x_y1 += x
+        elif y==-1:
+            self.count_yneg1 += 1
+            self.count_x_yneg1 += x
 
-        n_pos = np.sum(mask_pos)
-        n_neg = np.sum(mask_neg)
+    def predict_one(self, x, laplace=1e-6):
+        """
+        x: (M,), 0/1
+        laplace: 拉普拉斯平滑，为避免分母为0，默认为1e-6（或1)
+        return: 1或-1
+        """
+        # P(y=1)
+        total = self.count_y1 + self.count_yneg1
+        if total == 0:         # 没有数据
+            return 1  # 或任选
+        P_y1 = self.count_y1 / total
+        P_yneg1 = self.count_yneg1 / total
 
-        # 条件概率，若正负类全为0，避免除零出现0/0（此时概率无意义，但我们强行存1）
-        self.P_x1_y1 = np.sum(X_pos, axis=0) / n_pos if n_pos > 0 else np.ones(self.M)
-        self.P_x0_y1 = 1 - self.P_x1_y1
-        self.P_x1_y_1 = np.sum(X_neg, axis=0) / n_neg if n_neg > 0 else np.ones(self.M)
-        self.P_x0_y_1 = 1 - self.P_x1_y_1
+        # 条件概率
+        # 拉普拉斯平滑: +laplace, 分母也+2*laplace
+        P_x1_y1 = (self.count_x_y1 + laplace) / (self.count_y1 + 2 * laplace)
+        P_x0_y1 = 1 - P_x1_y1
+        P_x1_yneg1 = (self.count_x_yneg1 + laplace) / (self.count_yneg1 + 2 * laplace)
+        P_x0_yneg1 = 1 - P_x1_yneg1
 
-        self.P_y1 = n_pos / len(y) if len(y) > 0 else 0.5
-        self.P_y_1 = n_neg / len(y) if len(y) > 0 else 0.5
-
-        # LUT建表
-        self.lut = np.empty(2**self.M, dtype=np.int8)
-        for i in range(2 ** self.M):
-            x = np.array([(i >> j) & 1 for j in range(self.M)][::-1], dtype=np.uint8)
-            # 正类概率
-            prob1 = self.P_y1 * np.prod(np.where(x==1, self.P_x1_y1, self.P_x0_y1))
-            # 负类概率
-            prob2 = self.P_y_1 * np.prod(np.where(x==1, self.P_x1_y_1, 1-self.P_x1_y_1))
-            # 哪个概率大
-            self.lut[i] = 1 if prob1 >= prob2 else -1
-
-        import matplotlib.pyplot as plt
-        ind = np.arange(self.M)
-        width = 0.35
-        plt.bar(ind, self.P_x1_y1, width, label="P(x=1|y=1)")
-        plt.bar(ind+width, self.P_x1_y_1, width, label="P(x=1|y=-1)")
-        plt.xlabel("feature id")
-        plt.ylabel("probability")
-        plt.legend()
-        plt.savefig("naivebayes.png")
-
-    def predict(self, X):
-        X = np.asarray(X, dtype=np.uint8)
-        idxs = np.packbits(X, axis=1, bitorder="little")[:, 0]
-        return self.lut[idxs]
-
+        prob1 = P_y1
+        probneg1 = P_yneg1
+        # 贝叶斯公式 连乘
+        for j in range(self.M):
+            if x[j]:
+                prob1 *= P_x1_y1[j]
+                probneg1 *= P_x1_yneg1[j]
+            else:
+                prob1 *= P_x0_y1[j]
+                probneg1 *= P_x0_yneg1[j]
+        total = prob1 + probneg1
+        prob1_norm = prob1 / total
+        probneg1_norm = probneg1 / total
+        return prob1_norm - probneg1_norm
+    
 class NaiveBayes_Cache:
     def __init__(self, cache_size,  k=5,M=16):
         self.cache_size = cache_size
         self.k = k
         self.M = M
-        self.naivebayes = NaiveBayes()
+        self.naivebayes_table = {}
 
-    def train(self, requests):
-        X = [i.obj_id for i in requests]
-        N = len(X)
-        belady = Belady(self.cache_size)
-        belady.initial(requests)
-        belady.resize(N)
-        X = self.preprocess(X)
-        Y = np.array([1 if i else -1 for i in belady.result])
-        self.naivebayes.fit(X, Y)
-
-    def predict(self, X):
-        X = self.preprocess([i.obj_id for i in X])
-        return [False if i < 0 else True for i in self.naivebayes.predict(X)]
-    
-    def predict_online(self, X, batch_size=100):
+    def predict_online(self, X):
         """
         X_all: list, 长度N，请求（带obj_id）
         Y_true: list or np array, 长度N，真实标签（如belady结果[-1/1]）
-        batch_size: int, e.g. 100
         return: list, 预测结果
         """
+        N = len(X)
+        belady = Belady(self.cache_size)
+        belady.initial(X)
+        belady.resize(N)
+        X_processed = self.preprocess([i.obj_id for i in X])
+        Y = np.array([1 if i else -1 for i in belady.result])
+
         Y_pred = []
         total = len(X)
-        for start in range(0, total, batch_size):
-            end = min(start+batch_size, total)
-            X_batch = X[start:end]
-
+        for i in range(0, total):
             # 预测
-            Y_batch_pred = self.predict(X_batch)
-            Y_pred.extend(Y_batch_pred)
+            xi = X[i].obj_id
+            if xi not in self.naivebayes_table:
+                self.naivebayes_table[xi] = NaiveBayes(self.M)
+            Y_pred.append(int(self.naivebayes_table[xi].predict_one(X_processed[i])))
             # 按实际label增量训练
-            self.train(X_batch)
+            self.naivebayes_table[xi].fit_one(X_processed[i], Y[i])
+
         return Y_pred
 
     def preprocess(self, X):
