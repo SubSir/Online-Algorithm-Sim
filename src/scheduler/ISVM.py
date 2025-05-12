@@ -158,7 +158,7 @@ class ISVM_Cache:
             # 预测
             if X1[i] not in self.isvm_table:
                 self.isvm_table[X1[i]] = ISVM(self.upper_bound)
-            Y_pred.append(self.isvm_table[X1[i]].svm_predict(X_processed[i]) // 50)
+            Y_pred.append(self.isvm_table[X1[i]].svm_predict(X_processed[i]))
             # 按实际label增量训练
             self.isvm_table[X1[i]].svm_update_one(X_processed[i], Y_processed[i])
         return Y_pred
@@ -390,7 +390,7 @@ class MultiVar_Cache:
             xi = X[i].obj_id
             if xi not in self.multivar_table:
                 self.multivar_table[xi] = MultiVariableLinearClassifier(self.M)
-            Y_pred.append(int(self.multivar_table[xi].predict_one(X_processed[i])))
+            Y_pred.append(int(self.multivar_table[xi].predict_one(X_processed[i]) * 1000))
             # 按实际label增量训练
             self.multivar_table[xi].fit_one(X_processed[i], Y[i])
 
@@ -502,7 +502,7 @@ class NaiveBayes_Cache:
             xi = X[i].obj_id
             if xi not in self.naivebayes_table:
                 self.naivebayes_table[xi] = NaiveBayes(self.M)
-            Y_pred.append(int(self.naivebayes_table[xi].predict_one(X_processed[i])))
+            Y_pred.append(int(self.naivebayes_table[xi].predict_one(X_processed[i]) * 1000))
             # 按实际label增量训练
             self.naivebayes_table[xi].fit_one(X_processed[i], Y[i])
 
